@@ -862,6 +862,12 @@ static const ARMCPRegInfo vmsa_cp_reginfo[] = {
     { .name = "IFSR", .cp = 15, .crn = 5, .crm = 0, .opc1 = 0, .opc2 = 1,
       .access = PL1_RW, .type = ARM_CP_BANKED,
       .fieldoffset = offsetof(CPUARMState, cp15.c5_insn), .resetvalue = 0, },
+    { .name = "ADFSR", .cp = 15, .crn = 5, .crm = 1, .opc1 = 0, .opc2 = 0,
+      .access = PL1_RW, .type = ARM_CP_BANKED,
+      .fieldoffset = offsetof(CPUARMState, cp15.c5_insn), .resetvalue = 0, },
+    { .name = "AIFSR", .cp = 15, .crn = 5, .crm = 1, .opc1 = 0, .opc2 = 1,
+      .access = PL1_RW, .type = ARM_CP_BANKED,
+      .fieldoffset = offsetof(CPUARMState, cp15.c5_insn), .resetvalue = 0, },
     { .name = "TTBR0", .cp = 15, .crn = 2, .crm = 0, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .type = ARM_CP_BANKED,
       .fieldoffset = offsetof(CPUARMState, cp15.c2_base0), .resetvalue = 0, },
@@ -2401,6 +2407,7 @@ void do_interrupt(CPUARMState *env)
             //            cpu_abort(env, "SMC handling under semihosting not implemented\n");
             //            return;
         }
+        //fprintf(stderr, "helper: SMC exception\n");
         offset = env->thumb ? 2 : 0;
         new_mode = ARM_CPU_MODE_MON;
         addr = 0x08;
@@ -2412,7 +2419,7 @@ void do_interrupt(CPUARMState *env)
     }
     if (arm_feature(env, ARM_FEATURE_TRUSTZONE)) {
         uint32_t uncached_old_mode = (env->uncached_cpsr & CPSR_M);
-
+		//if (secure_entry || new_mode == ARM_CPU_MODE_MON) fprintf(stderr, "helper(%d) %x: change mode %x -> %x\n",secure_entry, env->regs[15], uncached_old_mode, new_mode);
         /* NOTE: TrustZone: Handle SCR.AW/SCR.FW in when we stay in
            normal world. */
         if (new_mode != ARM_CPU_MODE_MON && !secure_entry) {
