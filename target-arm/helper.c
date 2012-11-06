@@ -862,12 +862,6 @@ static const ARMCPRegInfo vmsa_cp_reginfo[] = {
     { .name = "IFSR", .cp = 15, .crn = 5, .crm = 0, .opc1 = 0, .opc2 = 1,
       .access = PL1_RW, .type = ARM_CP_BANKED,
       .fieldoffset = offsetof(CPUARMState, cp15.c5_insn), .resetvalue = 0, },
-    { .name = "ADFSR", .cp = 15, .crn = 5, .crm = 1, .opc1 = 0, .opc2 = 0,
-      .access = PL1_RW, .type = ARM_CP_BANKED,
-      .fieldoffset = offsetof(CPUARMState, cp15.c5_insn), .resetvalue = 0, },
-    { .name = "AIFSR", .cp = 15, .crn = 5, .crm = 1, .opc1 = 0, .opc2 = 1,
-      .access = PL1_RW, .type = ARM_CP_BANKED,
-      .fieldoffset = offsetof(CPUARMState, cp15.c5_insn), .resetvalue = 0, },
     { .name = "TTBR0", .cp = 15, .crn = 2, .crm = 0, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .type = ARM_CP_BANKED,
       .fieldoffset = offsetof(CPUARMState, cp15.c2_base0), .resetvalue = 0, },
@@ -881,6 +875,11 @@ static const ARMCPRegInfo vmsa_cp_reginfo[] = {
     { .name = "DFAR", .cp = 15, .crn = 6, .crm = 0, .opc1 = 0, .opc2 = 0,
       .access = PL1_RW, .fieldoffset = offsetof(CPUARMState, cp15.c6_data),
       .resetvalue = 0, .type = ARM_CP_BANKED, },
+    /* ADFSR/AIFSR are dummy all the way */
+    { .name = "ADFSR", .cp = 15, .crn = 5, .crm = 1, .opc1 = 0, .opc2 = 0,
+      .access = PL1_R, .type = ARM_CP_CONST, .resetvalue = 0, },
+    { .name = "AIFSR", .cp = 15, .crn = 5, .crm = 1, .opc1 = 0, .opc2 = 1,
+      .access = PL1_R, .type = ARM_CP_CONST, .resetvalue = 0, },
     REGINFO_SENTINEL
 };
 
