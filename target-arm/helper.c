@@ -1216,6 +1216,8 @@ static const ARMCPRegInfo trustzone_cp_reginfo[] = {
     { .name = "MVBAR", .cp = 15, .crn = 12, .crm = 0, .opc1 = 0, .opc2 = 1,
       .access = PL3_RW, .fieldoffset = offsetof(CPUARMState, cp15.c12_mvbar),
       .writefn = mvbar_write, .resetvalue = 0 },
+    { .name = "ISR", .cp = 15, .crn = 12, .crm = 1, .opc1 = 0, .opc2 = 0,
+      .access = PL3_RW, .type = ARM_CP_CONST, .resetvalue = 0 },
     REGINFO_SENTINEL
 };
 
