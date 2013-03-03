@@ -502,6 +502,7 @@ static void arm_kernel_cmpxchg64_helper(CPUARMState *env)
     uint64_t oldval, newval, val;
     uint32_t addr, cpsr;
     target_siginfo_t info;
+    int is_secure = arm_current_secure(env);
 
     /* Based on the 32 bit code in do_kernel_trap */
 
@@ -514,17 +515,17 @@ static void arm_kernel_cmpxchg64_helper(CPUARMState *env)
     addr = env->regs[2];
 
     if (get_user_u64(oldval, env->regs[0])) {
-        env->cp15.c6_data = env->regs[0];
+        CPU_REG_BANKED(env, cp15.c6_data, is_secure) = env->regs[0];
         goto segv;
     };
 
     if (get_user_u64(newval, env->regs[1])) {
-        env->cp15.c6_data = env->regs[1];
+        CPU_REG_BANKED(env, cp15.c6_data, is_secure) = env->regs[1];
         goto segv;
     };
 
     if (get_user_u64(val, addr)) {
-        env->cp15.c6_data = addr;
+        CPU_REG_BANKED(env, cp15.c6_data, is_secure) = addr;
         goto segv;
     }
 
@@ -532,7 +533,7 @@ static void arm_kernel_cmpxchg64_helper(CPUARMState *env)
         val = newval;
 
         if (put_user_u64(val, addr)) {
-            env->cp15.c6_data = addr;
+            CPU_REG_BANKED(env, cp15.c6_data, is_secure) = addr;
             goto segv;
         };
 
@@ -554,7 +555,7 @@ segv:
     info.si_errno = 0;
     /* XXX: check env->error_code */
     info.si_code = TARGET_SEGV_MAPERR;
-    info._sifields._sigfault._addr = env->cp15.c6_data;
+    info._sifields._sigfault._addr = CPU_REG_BANKED(env, cp15.c6_data, is_secure);
     queue_signal(env, info.si_signo, &info);
 
     end_exclusive();
@@ -567,6 +568,7 @@ do_kernel_trap(CPUARMState *env)
     uint32_t addr;
     uint32_t cpsr;
     uint32_t val;
+    int is_secure = arm_current_secure(env);
 
     switch (env->regs[15]) {
     case 0xffff0fa0: /* __kernel_memory_barrier */
@@ -597,7 +599,7 @@ do_kernel_trap(CPUARMState *env)
         end_exclusive();
         break;
     case 0xffff0fe0: /* __kernel_get_tls */
-        env->regs[0] = env->cp15.c13_tls2;
+        env->regs[0] = CPU_REG_BANKED(env, cp15.c13_tls2, is_secure);
         break;
     case 0xffff0f60: /* __kernel_cmpxchg64 */
         arm_kernel_cmpxchg64_helper(env);
@@ -623,7 +625,8 @@ static int do_strex(CPUARMState *env)
     int size;
     int rc = 1;
     int segv = 0;
-    uint32_t addr;
+    int is_secure = arm_current_secure(env);
+    uint32_t addr;    
     start_exclusive();
     addr = env->exclusive_addr;
     if (addr != env->exclusive_test) {
@@ -645,7 +648,7 @@ static int do_strex(CPUARMState *env)
         abort();
     }
     if (segv) {
-        env->cp15.c6_data = addr;
+        CPU_REG_BANKED(env, cp15.c6_data, is_secure) = addr;
         goto done;
     }
     if (val != env->exclusive_val) {
@@ -654,7 +657,7 @@ static int do_strex(CPUARMState *env)
     if (size == 3) {
         segv = get_user_u32(val, addr + 4);
         if (segv) {
-            env->cp15.c6_data = addr + 4;
+            CPU_REG_BANKED(env, cp15.c6_data, is_secure) = addr + 4;
             goto done;
         }
         if (val != env->exclusive_high) {
@@ -675,14 +678,14 @@ static int do_strex(CPUARMState *env)
         break;
     }
     if (segv) {
-        env->cp15.c6_data = addr;
+        CPU_REG_BANKED(env, cp15.c6_data, is_secure) = addr;
         goto done;
     }
     if (size == 3) {
         val = env->regs[(env->exclusive_info >> 12) & 0xf];
         segv = put_user_u32(val, addr + 4);
         if (segv) {
-            env->cp15.c6_data = addr + 4;
+            CPU_REG_BANKED(env, cp15.c6_data, is_secure) = addr + 4;
             goto done;
         }
     }
@@ -857,10 +860,10 @@ void cpu_loop(CPUARMState *env)
             /* just indicate that signals should be handled asap */
             break;
         case EXCP_PREFETCH_ABORT:
-            addr = env->cp15.c6_insn;
+            addr = CPU_REG_BANKED(env, cp15.c6_insn, arm_current_secure(env));
             goto do_segv;
         case EXCP_DATA_ABORT:
-            addr = env->cp15.c6_data;
+            addr = CPU_REG_BANKED(env, cp15.c6_data, arm_current_secure(env));
         do_segv:
             {
                 info.si_signo = SIGSEGV;
@@ -891,7 +894,7 @@ void cpu_loop(CPUARMState *env)
             break;
         case EXCP_STREX:
             if (do_strex(env)) {
-                addr = env->cp15.c6_data;
+                addr = CPU_REG_BANKED(env, cp15.c6_data, arm_current_secure(env));
                 goto do_segv;
             }
             break;
