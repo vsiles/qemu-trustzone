@@ -21,7 +21,7 @@
 #define QEMU_ARM_CPU_QOM_H
 
 #include "qom/cpu.h"
-#include "qstring.h"
+#include "qapi/qmp/qstring.h"
 
 #define TYPE_ARM_CPU "arm-cpu"
 
