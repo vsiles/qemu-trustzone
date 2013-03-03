@@ -83,7 +83,7 @@ static inline unsigned tzc380_first_locked_region(tzc380_state *s)
     return region;
 }
 
-static uint64_t tzc380_read(void *opaque, target_phys_addr_t offset,
+static uint64_t tzc380_read(void *opaque, hwaddr offset,
                             unsigned size)
 {
     tzc380_state *s = opaque;
@@ -167,7 +167,7 @@ static uint64_t tzc380_read(void *opaque, target_phys_addr_t offset,
     }
 }
 
-static void tzc380_write(void *opaque, target_phys_addr_t offset,
+static void tzc380_write(void *opaque, hwaddr offset,
                          uint64_t val, unsigned size)
 {
     tzc380_state *s = opaque;
@@ -291,12 +291,12 @@ static const MemoryRegionOps tzc380_ops = {
     .endianness = DEVICE_NATIVE_ENDIAN
 };
 
-DeviceState* tzc380_create_simple(target_phys_addr_t addr)
+DeviceState* tzc380_create_simple(hwaddr addr)
 {
     DeviceState *dev;
     dev = qdev_create(NULL, "tzc380");
     qdev_init_nofail(dev);
-    sysbus_mmio_map(sysbus_from_qdev(dev), 0, addr);
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, addr);
     return dev;
 }
 

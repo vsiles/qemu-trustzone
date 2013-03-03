@@ -35,8 +35,8 @@
 typedef struct BP147DecprotInfo {
     unsigned reg;
     unsigned bit;
-    target_phys_addr_t addr;
-    target_phys_addr_t size;
+    hwaddr addr;
+    hwaddr size;
     void (*update)(void *opaque, int value);
     void *opaque;
 } BP147DecprotInfo;
@@ -65,7 +65,7 @@ void bp147_add_region(DeviceState *d, const BP147DecprotInfo *info);
  * @info: Array of decode protection region definitions.
  * @count: Number of regions to define initially.
  */
-DeviceState* bp147_create_simple(target_phys_addr_t addr,
+DeviceState* bp147_create_simple(hwaddr addr,
                                  const BP147DecprotInfo *info, unsigned count);
 
 /* TODO: TrustZone: API for the decode protection regions */
@@ -79,7 +79,7 @@ DeviceState* bp147_create_simple(target_phys_addr_t addr,
  *
  * @addr: Physical base address of the BP147 device.
  */
-DeviceState* tzc380_create_simple(target_phys_addr_t addr);
+DeviceState* tzc380_create_simple(hwaddr addr);
 
 /**
  * arm_check_phys_access() - Check access permissions of a physical memory page.
@@ -103,7 +103,7 @@ DeviceState* tzc380_create_simple(target_phys_addr_t addr);
  * @return: Zero if access is granted or an MMU fault status code compatible
  *  with get_phys_addr().
  */
-int arm_check_phys_access(target_phys_addr_t phys_addr, target_ulong page_size,
+int arm_check_phys_access(hwaddr phys_addr, target_ulong page_size,
                           int is_user, int is_secure, int prot);
 
 #endif /* !CONFIG_USER_ONLY */

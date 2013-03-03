@@ -83,7 +83,7 @@ static void bp147_decprot_update(BP147Device *s, unsigned idx,
     s->decprot[idx] = new_val;
 }
 
-static void bp147_write(void *opaque, target_phys_addr_t offset,
+static void bp147_write(void *opaque, hwaddr offset,
                         uint64_t val, unsigned size)
 {
     BP147Device *s = opaque;
@@ -120,7 +120,7 @@ static void bp147_write(void *opaque, target_phys_addr_t offset,
     }
 }
 
-static uint64_t bp147_read(void *opaque, target_phys_addr_t offset,
+static uint64_t bp147_read(void *opaque, hwaddr offset,
                            unsigned size)
 {
     BP147Device *s = opaque;
@@ -194,7 +194,7 @@ void bp147_add_region(DeviceState *d, const BP147DecprotInfo *info)
     s->impmask[info->reg] |= (1 << info->bit);
 }
 
-DeviceState* bp147_create_simple(target_phys_addr_t addr,
+DeviceState* bp147_create_simple(hwaddr addr,
                                  const BP147DecprotInfo *info, unsigned count)
 {
     DeviceState *dev;
@@ -208,7 +208,7 @@ DeviceState* bp147_create_simple(target_phys_addr_t addr,
 
     qdev_init_nofail(dev);
 
-    sysbus_mmio_map(sysbus_from_qdev(dev), 0, addr);
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, addr);
     return dev;
 }
 
