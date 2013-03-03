@@ -21,12 +21,12 @@
 #include "sysbus.h"
 #include "arm_gic_internal.h"
 
-/* #define DEBUG_GIC */
-/* #define GIC_SECURITY_EXTENSIONS */
+/*#define DEBUG_GIC*/
+#define GIC_SECURITY_EXTENSIONS
 
 #ifdef DEBUG_GIC
 #define DPRINTF(fmt, ...) \
-do { fprintf(stderr, "arm_gic: " fmt , ## __VA_ARGS__); } while (0)
+    do { fprintf(stderr, "arm_gic: %s: " fmt , gic_is_secure_access(s)? "secure" : "normal" , ## __VA_ARGS__); } while (0)
 #else
 #define DPRINTF(fmt, ...) do {} while(0)
 #endif
@@ -48,10 +48,13 @@ static inline int gic_get_current_cpu(GICState *s)
 
 static inline int gic_is_secure_access(GICState *s)
 {
-    int cpu = gic_get_current_cpu(s);
-    return arm_current_secure(qemu_get_cpu(cpu));
+    int gic_cpu = gic_get_current_cpu(s);
+    ARMCPU *cpu = ARM_CPU(qemu_get_cpu(gic_cpu));
+    CPUARMState *env = &cpu->env;
+    return arm_current_secure(env);
 }
 
+#if !defined(GIC_SECURITY_EXTENSIONS)
 /* TODO: Many places that call this routine could be optimized.  */
 /* Update interrupt status after enabled or pending bits have been changed.  */
 static void gic_update_simple(GICState *s, int cpu)
@@ -79,6 +82,7 @@ static void gic_update_simple(GICState *s, int cpu)
          }
     }
 }
+#endif /* !GIC_SECURITY_EXTENSIONS */
 
 
 
@@ -102,7 +106,6 @@ static void gic_update_trustzone(GICState  *s, int cpu)
     int irq;
 
     s->current_pending[cpu] = 1023;
-
     if (!s->enabled || !(s->cpu_enabled[cpu] & 0x03)) {
         qemu_irq_lower(s->parent_irq[cpu]);
         qemu_irq_lower(s->parent_fiq[cpu]);
@@ -112,7 +115,7 @@ static void gic_update_trustzone(GICState  *s, int cpu)
     /* Find the highest pending IRQ */
     best_prio = 0x100;
     best_irq = 1023;
-
+    
     for (irq = 0; irq < s->num_irq; irq++) {
         if (GIC_TEST_ENABLED(irq, cm) && GIC_TEST_PENDING(irq, cm)) {
             if (GIC_GET_PRIORITY(irq, cpu) < best_prio) {
@@ -129,29 +132,64 @@ static void gic_update_trustzone(GICState  *s, int cpu)
         }
     }
 
-    if (best_prio <= s->priority_mask[cpu]) {
-        /* TODO: Handle active IRQ case ...*/
-        if (GIC_TEST_SECURE(best_irq, cm) &&
-            (s->cpu_enabled[cpu] & 0x01)) {
-            /* Highest pending interrupt is secure */
-            if (s->cpu_enabled[cpu] & 0x08) {
-                /* Signal as FIQ */
-                DPRINTF("Signaling secure FIQ %d\n", best_irq);
-                s->current_pending[cpu] = best_irq;
-                next_fiq = 1;
-            } else {
-                /* Signal as IRQ */
-                DPRINTF("Signaling secure IRQ %d\n", best_irq);
+    if (best_irq != 1023) {
+        int secure_int = GIC_TEST_SECURE(best_irq, cm);
+        int enable_s  = (s->cpu_enabled[cpu] & 0x01);
+        int enable_ns = (s->cpu_enabled[cpu] & 0x02);
+        int fiq_en    = (s->cpu_enabled[cpu] & 0x08);
+
+        if (s->running_irq[cpu] == 1023) {            
+            /* No active interrupt */
+            if (secure_int && enable_s) {
+                if (fiq_en) {
+                    DPRINTF("Signaling secure FIQ %d\n", best_irq);
+                    s->current_pending[cpu] = best_irq;
+                    next_fiq = 1;
+                } else {
+                    DPRINTF("Signaling secure IRQ %d\n", best_irq);
+                    s->current_pending[cpu] = best_irq;
+                    next_irq = 1; /* Secure IRQ signaled on IRQ */
+                }
+
+            } else if (!secure_int && enable_ns) {
+                DPRINTF("Signaling normal IRQ %d\n", best_irq);
                 s->current_pending[cpu] = best_irq;
                 next_irq = 1;
             }
+        } else {
+            int active_prio = GIC_GET_PRIORITY(s->running_irq[cpu], cpu);
 
-        } else if (!GIC_TEST_SECURE(best_irq, cm) &&
-                   (s->cpu_enabled[cpu] & 0x02)) {
-            /* Highest pending interrupt is non-secure */
-            DPRINTF("Signaling normal IRQ %d\n", best_irq);
-            s->current_pending[cpu] = best_irq;
-            next_irq = 1;        }
+            /* Currently active interrupts */
+            if (secure_int && enable_s) {
+                if (best_prio < active_prio) {
+                    if (fiq_en) {
+                        DPRINTF("Prrempt normal IRQ%d by secure FIQ%d\n", 
+                                s->running_irq[cpu], best_irq);
+
+                        next_fiq = 1;
+                        s->current_pending[cpu] = best_irq;
+                    } else {
+                        DPRINTF("Prrempt normal IRQ%d by secure IRQ%d\n", 
+                                s->running_irq[cpu], best_irq);
+
+                        next_irq = 1;
+                        s->current_pending[cpu] = best_irq;
+                    }
+                }
+
+            } else if (!secure_int && enable_ns) {
+                if (best_prio < active_prio) {
+                    DPRINTF("Normal preemption of active IRQ%d by IRQ%d\n", 
+                            s->running_irq[cpu], best_irq);
+
+                    next_irq = 1;
+                    s->current_pending[cpu] = best_irq;
+                }
+            } else {
+                DPRINTF("No preemption of active IRQ%d by IRQ%d\n", 
+                        s->running_irq[cpu], best_irq);
+            }
+        }
     }
 
     qemu_set_irq(s->parent_irq[cpu], next_irq);
@@ -165,11 +203,7 @@ void gic_update(GICState  *s)
 
     for (cpu = 0; cpu < NUM_CPU(s); cpu++) {
 #ifdef GIC_SECURITY_EXTENSIONS
-        if (arm_feature(qemu_get_cpu(cpu), ARM_FEATURE_TRUSTZONE)) {
-            gic_update_trustzone(s, cpu);
-        } else {
-            gic_update_simple(s, cpu);
-        }
+        gic_update_trustzone(s, cpu);       
 #else
         gic_update_simple(s, cpu);
 #endif
@@ -246,10 +280,24 @@ uint32_t gic_acknowledge_irq(GICState *s, int cpu)
     /* TODO: TrustZone: Determine correct IRQ */
     int new_irq;
     int cm = 1 << cpu;
+    int secure_irq;
+    int secure_access;
     new_irq = s->current_pending[cpu];
     if (new_irq == 1023
             || GIC_GET_PRIORITY(new_irq, cpu) >= s->running_priority[cpu]) {
-        DPRINTF("ACK no pending IRQ\n");
+        return 1023;
+    }
+    /* NOTE: TrustZone: ACK filter */
+    secure_irq = GIC_TEST_SECURE(new_irq, cm);
+    secure_access = gic_is_secure_access(s);
+    if (!secure_irq) {
+        if (s->cpu_enabled[cpu] & 0x04) {
+            DPRINTF("NACK to pending normal IRQ %d\n", new_irq);
+            return 1023;
+        }
+    } else if (!secure_access) {
+        /* Can not acknowlegde a secure IRQ from normal world */
+        DPRINTF("NACK to pending secure IRQ %d\n", new_irq);
         return 1023;
     }
     s->last_active[new_irq][cpu] = s->running_irq[cpu];
@@ -277,8 +325,10 @@ void gic_complete_irq(GICState *s, int cpu, int irq)
          */
         return;
     }
-    if (s->running_irq[cpu] == 1023)
+    if (s->running_irq[cpu] == 1023) {
+        DPRINTF("EOI %d not pending\n", irq);
         return; /* No active IRQ.  */
+    }
     /* Mark level triggered interrupts as pending if they are still
        raised.  */
     if (!GIC_TEST_TRIGGER(irq) && GIC_TEST_ENABLED(irq, cm)
@@ -377,7 +427,7 @@ static uint32_t gic_dist_readb(void *opaque, hwaddr offset)
         mask = (irq < GIC_INTERNAL) ?  cm : ALL_CPU_MASK;
         for (i = 0; i < 8; i++) {
             /* NOTE: TrustZone: Secure interrupt is RAZ/WI for normal world */
-            /*if (!GIC_TEST_SECURE(irq + i, cm) || gic_is_secure_access(s))*/ {
+            if (!GIC_TEST_SECURE(irq + i, cm) || gic_is_secure_access(s)) {
                 if (GIC_TEST_PENDING(irq + i, mask)) {
                     res |= (1 << i);
                 }
@@ -404,12 +454,13 @@ static uint32_t gic_dist_readb(void *opaque, hwaddr offset)
         if (irq >= s->num_irq)
             goto bad_reg;
 
-        if (!GIC_TEST_SECURE(irq, cm) && !gic_is_secure_access(s)) {
-            res = 0x80;
-        } else {
-            /* NOTE: TrustZone: Secure interrupt is RAZ/WI for normal world */
-            res = GIC_GET_PRIORITY(irq, cpu);
+        /* NOTE: TrustZone: Secure interrupt is RAZ/WI for normal world */
+        res = GIC_GET_PRIORITY(irq, cpu);
+
+        if (GIC_TEST_SECURE(irq, cm)) {
+            
         }
+        
     } else if (offset < 0xc00) {
         /* Interrupt CPU Target.  */
         if (s->num_cpu == 1 && s->revision != REV_11MPCORE) {
@@ -472,8 +523,17 @@ static uint32_t gic_dist_readw(void *opaque, hwaddr offset)
 static uint32_t gic_dist_readl(void *opaque, hwaddr offset)
 {
     uint32_t val;
-    val = gic_dist_readw(opaque, offset);
-    val |= gic_dist_readw(opaque, offset + 2) << 16;
+
+    if (offset == 0xF00) {
+        /* NOTE: TrustZone: Certain software ... tries to read from this
+         * register - we simply pretend 0 */
+        DPRINTF("BUG EMULATION: Read from W/O ICDSGIR");
+        val = 0;
+    } else {
+        val = gic_dist_readw(opaque, offset);
+        val |= gic_dist_readw(opaque, offset + 2) << 16;
+    }
+
     return val;
 }
 
@@ -484,8 +544,10 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
     int irq;
     int i;
     int cpu;
+    int cm;
 
     cpu = gic_get_current_cpu(s);
+    cm = (1 << cpu);
     if (offset < 0x80) {
         if (offset == 0) {
             s->enabled = (value & 1);
@@ -507,8 +569,6 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
                     (unsigned) value);
             for (i = 0; i < 8; i++) {
                 int is_secure = !(value & (1 << i));
-                int cm = (irq < GIC_INTERNAL) ? (1 << cpu) : ALL_CPU_MASK;
-
                 if (is_secure && !GIC_TEST_SECURE(irq + i, cm)) {
                     DPRINTF("Update security status of IRQ %d to %ssecure\n",
                             irq + i, is_secure ? "" : "non");
@@ -519,6 +579,9 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
                 } else {
                     GIC_CLEAR_SECURE(irq + i, cm);
                 }
+
+                DPRINTF(" IRQ%d is %ssecure\n", irq + i,
+                        GIC_TEST_SECURE(irq + i, cm) ? "" : "non");
             }
         }
 
@@ -535,7 +598,6 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
             if (value & (1 << i)) {
                 int mask =
                     (irq < GIC_INTERNAL) ? (1 << cpu) : GIC_TARGET(irq + i);
-                int cm = (irq < GIC_INTERNAL) ? (1 << cpu) : ALL_CPU_MASK;
 
                 /* NOTE: TrustZone: Secure interrupt is RAZ/WI for
                  * normal world */
@@ -544,14 +606,15 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
                         DPRINTF("Enabled IRQ %d\n", irq + i);
                     }
                     GIC_SET_ENABLED(irq + i, cm);
-                    /* If a raised level triggered IRQ enabled then mark
-                       is as pending.  */
-                    if (GIC_TEST_LEVEL(irq + i, mask)
-                        && !GIC_TEST_TRIGGER(irq + i)) {
-                        DPRINTF("Set %d pending mask %x\n", irq + i, mask);
-                        GIC_SET_PENDING(irq + i, mask);
-                    }
                 }
+
+                /* If a raised level triggered IRQ enabled then mark
+                   is as pending.  */
+                if (GIC_TEST_LEVEL(irq + i, mask)
+                    && !GIC_TEST_TRIGGER(irq + i)) {
+                    DPRINTF("Set %d pending mask %x\n", irq + i, mask);
+                    GIC_SET_PENDING(irq + i, mask);
+                }                
             }
         }
     } else if (offset < 0x200) {
@@ -563,8 +626,6 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
           value = 0;
         for (i = 0; i < 8; i++) {
             if (value & (1 << i)) {
-                int cm = ((irq + i) < GIC_INTERNAL) ? (1 << cpu) : ALL_CPU_MASK;
-
                 /* NOTE: TrustZone: Secure interrupt is RAZ/WI for
                  * normal world */
                 if (!GIC_TEST_SECURE(irq + i, cm) || gic_is_secure_access(s)) {
@@ -572,6 +633,9 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
                         DPRINTF("Disabled IRQ %d\n", irq + i);
                     }
                     GIC_CLEAR_ENABLED(irq + i, cm);
+                } else if (GIC_TEST_ENABLED(irq + i, cm)) {
+                    DPRINTF("Reject non-secure disable of IRQ %d\n",
+                            irq + i);
                 }
             }
         }
@@ -585,7 +649,14 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
 
         for (i = 0; i < 8; i++) {
             if (value & (1 << i)) {
-                GIC_SET_PENDING(irq + i, GIC_TARGET(irq + i));
+                /* NOTE: TrustZone: Secure interrupt is RAZ/WI for
+                 * normal world */
+                if (!GIC_TEST_SECURE(irq + i, cm) || gic_is_secure_access(s)) {
+                    GIC_SET_PENDING(irq + i, GIC_TARGET(irq));
+                } else {
+                    DPRINTF("Reject non-secure set pending of IRQ %d\n",
+                            irq + i);
+                }
             }
         }
     } else if (offset < 0x300) {
@@ -594,8 +665,6 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
         if (irq >= s->num_irq)
             goto bad_reg;
         for (i = 0; i < 8; i++) {
-            int cm = (irq < GIC_INTERNAL) ? (1 << cpu) : ALL_CPU_MASK;
-
             /* NOTE: TrustZone: Secure interrupt is RAZ/WI for normal world */
             if (!GIC_TEST_SECURE(irq + i, cm) || gic_is_secure_access(s)) {
                 /* ??? This currently clears the pending bit for all CPUs, even
@@ -604,6 +673,9 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
                 if (value & (1 << i)) {
                     GIC_CLEAR_PENDING(irq + i, ALL_CPU_MASK);
                 }
+            } else {
+                DPRINTF("Reject non-secure clear pending of IRQ %d\n",
+                        irq + i);
             }
         }
     } else if (offset < 0x400) {
@@ -616,20 +688,24 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
         if (irq >= s->num_irq)
             goto bad_reg;
 
-        int cm = (irq < GIC_INTERNAL) ? (1 << cpu) : ALL_CPU_MASK;
+        int secure_access = gic_is_secure_access(s);
 
         /* NOTE: TrustZone: Secure interrupt is RAZ/WI for normal world */
-        if (!GIC_TEST_SECURE(irq, cm) || gic_is_secure_access(s)) {
+        if (!secure_access) {
+            /* Translate to distributor view */
+            value = 0x80 | ((value >> 1) & 0x7F);
+            /* DPRINTF("Translated priority to %02x\n", value); */
+        }
 
-            if (!GIC_TEST_SECURE(irq, cm)) {
-                value = 0x80 | (value >> 1);
-            }
-
+        if (!GIC_TEST_SECURE(irq, cm) || secure_access) {
             if (irq < GIC_INTERNAL) {
-                s->priority1[irq][cpu] = value & 0xFF;
+                s->priority1[irq][cpu] = value;
             } else {
-                s->priority2[irq - GIC_INTERNAL] = value & 0xFF;
-            }
+                s->priority2[irq - GIC_INTERNAL] = value;
+            }        
+        } else {
+            DPRINTF("Reject non-secure priority change of IRQ %d\n",
+                    irq);
         }
     } else if (offset < 0xc00) {
         /* Interrupt CPU Target. RAZ/WI on uniprocessor GICs, with the
@@ -641,8 +717,6 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
                 goto bad_reg;
             }
 
-            int cm = (irq < GIC_INTERNAL) ? (1 << cpu) : ALL_CPU_MASK;
-
             /* NOTE: TrustZone: Secure interrupt is RAZ/WI for normal world */
             if (!GIC_TEST_SECURE(irq, cm) || gic_is_secure_access(s)) {
                 if (irq < 29) {
@@ -651,6 +725,9 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
                     value = ALL_CPU_MASK;
                 }
                 s->irq_target[irq] = value & ALL_CPU_MASK;
+            } else {
+                DPRINTF("Reject non-secure target change of IRQ %d\n",
+                        irq);
             }
         }
     } else if (offset < 0xf00) {
@@ -661,8 +738,6 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
         if (irq < GIC_INTERNAL)
             value |= 0xaa;
         for (i = 0; i < 4; i++) {
-            int cm = (irq < GIC_INTERNAL) ? (1 << cpu) : ALL_CPU_MASK;
-
             /* NOTE: TrustZone: Secure interrupt is RAZ/WI for normal world */
             if (!GIC_TEST_SECURE(irq + i, cm) || gic_is_secure_access(s)) {
                 if (value & (1 << (i * 2))) {
@@ -675,6 +750,9 @@ static void gic_dist_writeb(void *opaque, hwaddr offset,
                 } else {
                     GIC_CLEAR_TRIGGER(irq + i);
                 }
+            } else {
+                DPRINTF("Reject non-secure configuration change of IRQ %d\n",
+                        irq + i);
             }
         }
     } else {
@@ -706,6 +784,7 @@ static void gic_dist_writel(void *opaque, hwaddr offset,
 
         cpu = gic_get_current_cpu(s);
         irq = value & 0x3ff;
+
         switch ((value >> 24) & 3) {
         case 0:
             mask = (value >> 16) & ALL_CPU_MASK;
