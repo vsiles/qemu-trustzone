@@ -758,9 +758,6 @@ static inline CPUARMState *cpu_init(const char *cpu_model)
 #define cpu_signal_handler cpu_arm_signal_handler
 #define cpu_list arm_cpu_list
 
-/* NOTE: TrustZone: Changed from 9 to 10 to accomodate banked registers */
-#define CPU_SAVE_VERSION 10
-
 /* MMU modes definitions */
 #define MMU_MODE0_SUFFIX _kernel       /* Secure privileged modes */
 #define MMU_MODE1_SUFFIX _user         /* Secure user mode        */

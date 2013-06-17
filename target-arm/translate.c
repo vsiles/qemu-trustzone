@@ -6755,10 +6755,10 @@ static void gen_srs(DisasContext *s,
     }
     tcg_gen_addi_i32(addr, addr, offset);
     tmp = load_reg(s, 14);
-    gen_st32(tmp, addr, 0);
+    gen_st32(tmp, addr, MMU_IDX_PRIV(s));
     tmp = load_cpu_field(spsr);
     tcg_gen_addi_i32(addr, addr, 4);
-    gen_st32(tmp, addr, 0);
+    gen_st32(tmp, addr, MMU_IDX_PRIV(s));
     if (writeback) {
         switch (amode) {
         case 0:

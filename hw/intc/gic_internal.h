@@ -69,7 +69,8 @@ typedef struct gic_irq_state {
     uint8_t pending;
     uint8_t active;
     uint8_t level;
-    unsigned secure:NCPU;
+    uint8_t secure;
+    bool model; /* 0 = N:N, 1 = 1:N */
     bool trigger; /* nonzero = edge triggered.  */
 } gic_irq_state;
 

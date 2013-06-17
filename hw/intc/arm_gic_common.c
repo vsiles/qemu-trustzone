@@ -28,7 +28,6 @@ static void gic_pre_save(void *opaque)
     if (c->pre_save) {
         c->pre_save(s);
     }
-        qemu_put_byte(f, s->irq_state[i].secure);
 }
 
 static int gic_post_load(void *opaque, int version_id)
@@ -40,7 +39,6 @@ static int gic_post_load(void *opaque, int version_id)
         c->post_load(s);
     }
     return 0;
-        s->irq_state[i].secure = qemu_get_byte(f);
 }
 
 static const VMStateDescription vmstate_gic_irq_state = {
@@ -52,6 +50,7 @@ static const VMStateDescription vmstate_gic_irq_state = {
         VMSTATE_UINT8(pending, gic_irq_state),
         VMSTATE_UINT8(active, gic_irq_state),
         VMSTATE_UINT8(level, gic_irq_state),
+        VMSTATE_UINT8(secure, gic_irq_state),
         VMSTATE_BOOL(model, gic_irq_state),
         VMSTATE_BOOL(trigger, gic_irq_state),
         VMSTATE_END_OF_LIST()

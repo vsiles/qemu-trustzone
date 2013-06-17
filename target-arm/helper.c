@@ -6,7 +6,7 @@
 #include "qemu/bitops.h"
 
 #ifndef CONFIG_USER_ONLY
-#include "hw/arm_trustzone.h"
+#include "hw/arm/arm_trustzone.h"
 
 static inline int get_phys_addr(CPUARMState *env, uint32_t address,
                                 int access_type, int is_user, int is_secure,
@@ -2075,7 +2075,7 @@ static uint32_t *sys_gdb_reg_ptr(CPUARMState *env, int reg)
 {
     unsigned group = reg & 0x00000F00;
     unsigned idx   = reg & 0x000000FF;
-    int active_bank = bank_number(env, env->uncached_cpsr & CPSR_M);
+    int active_bank = bank_number(env->uncached_cpsr & CPSR_M);
     uint32_t *ptr = NULL;
 
     switch (group) {

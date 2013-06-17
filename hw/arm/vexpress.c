@@ -32,7 +32,7 @@
 #include "sysemu/blockdev.h"
 #include "hw/block/flash.h"
 
-#include "arm_trustzone.h"
+#include "hw/arm/arm_trustzone.h"
 
 #define VEXPRESS_BOARD_ID 0x8e0
 #define VEXPRESS_FLASH_SIZE (64 * 1024 * 1024)
