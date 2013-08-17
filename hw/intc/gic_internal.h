@@ -79,7 +79,7 @@ typedef struct GICState {
     qemu_irq parent_irq[NCPU];
     qemu_irq parent_fiq[NCPU];
     bool enabled;
-    bool cpu_enabled[NCPU];
+    uint8_t cpu_enabled[NCPU];
 
     gic_irq_state irq_state[GIC_MAXIRQ];
     uint8_t irq_target[GIC_MAXIRQ];

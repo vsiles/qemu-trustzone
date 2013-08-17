@@ -65,7 +65,7 @@ static const VMStateDescription vmstate_gic = {
     .post_load = gic_post_load,
     .fields = (VMStateField[]) {
         VMSTATE_BOOL(enabled, GICState),
-        VMSTATE_BOOL_ARRAY(cpu_enabled, GICState, NCPU),
+        VMSTATE_UINT8_ARRAY(cpu_enabled, GICState, NCPU),
         VMSTATE_STRUCT_ARRAY(irq_state, GICState, GIC_MAXIRQ, 1,
                              vmstate_gic_irq_state, gic_irq_state),
         VMSTATE_UINT8_ARRAY(irq_target, GICState, GIC_MAXIRQ),

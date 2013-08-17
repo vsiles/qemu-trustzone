@@ -21,7 +21,7 @@
 #include "hw/sysbus.h"
 #include "gic_internal.h"
 
-/*#define DEBUG_GIC*/
+//#define DEBUG_GIC
 #define GIC_SECURITY_EXTENSIONS
 
 #ifdef DEBUG_GIC
@@ -57,29 +57,41 @@ static inline int gic_is_secure_access(GICState *s)
 #if !defined(GIC_SECURITY_EXTENSIONS)
 /* TODO: Many places that call this routine could be optimized.  */
 /* Update interrupt status after enabled or pending bits have been changed.  */
-static void gic_update_simple(GICState *s, int cpu)
+static void gic_update_simple(GICState *s)
 {
     int best_irq;
     int best_prio;
     int irq;
     int level;
-    int cm = 1 << cpu;
+    int cpu;
+    int cm;
 
-    s->current_pending[cpu] = 1023;
-    if (!s->enabled || !(s->cpu_enabled[cpu] & 0x01)) {
-        qemu_irq_lower(s->parent_irq[cpu]);
-        return;
-    }
-    best_prio = 0x100;
-    best_irq = 1023;
-
-    for (irq = 0; irq < s->num_irq; irq++) {
-        if (GIC_TEST_ENABLED(irq, cm) && GIC_TEST_PENDING(irq, cm)) {
-            if (GIC_GET_PRIORITY(irq, cpu) < best_prio) {
-                best_prio = GIC_GET_PRIORITY(irq, cpu);
-                best_irq = irq;
+    for (cpu = 0; cpu < NUM_CPU(s); cpu++) {
+        cm = 1 << cpu;
+        s->current_pending[cpu] = 1023;
+        if (!s->enabled || !s->cpu_enabled[cpu]) {
+            qemu_irq_lower(s->parent_irq[cpu]);
+            return;
+        }
+        best_prio = 0x100;
+        best_irq = 1023;
+        for (irq = 0; irq < s->num_irq; irq++) {
+            if (GIC_TEST_ENABLED(irq, cm) && GIC_TEST_PENDING(irq, cm)) {
+                if (GIC_GET_PRIORITY(irq, cpu) < best_prio) {
+                    best_prio = GIC_GET_PRIORITY(irq, cpu);
+                    best_irq = irq;
+                }
             }
-         }
+        }
+        level = 0;
+        if (best_prio < s->priority_mask[cpu]) {
+            s->current_pending[cpu] = best_irq;
+            if (best_prio < s->running_priority[cpu]) {
+                DPRINTF("Raised pending IRQ %d (cpu %d)\n", best_irq, cpu);
+                level = 1;
+            }
+        }
+        qemu_set_irq(s->parent_irq[cpu], level);
     }
 }
 #endif /* !GIC_SECURITY_EXTENSIONS */
@@ -96,9 +108,12 @@ static void gic_update_simple(GICState *s, int cpu)
  *
  * TODO: BUGS AHEAD, GO GRAB A FLY SWATTER! (ACTIVE IRQ HANDLING IS BROKEN)
  */
-static void gic_update_trustzone(GICState  *s, int cpu)
+static void gic_update_trustzone(GICState *s, int cpu)
 {
     int cm = 1 << cpu;
+    int enable_s  = (s->cpu_enabled[cpu] & 0x01);
+    int enable_ns = (s->cpu_enabled[cpu] & 0x02);
+    int fiq_en    = (s->cpu_enabled[cpu] & 0x08);
     int next_irq = 0;
     int next_fiq = 0;
     int best_prio;
@@ -119,12 +134,11 @@ static void gic_update_trustzone(GICState  *s, int cpu)
     for (irq = 0; irq < s->num_irq; irq++) {
         if (GIC_TEST_ENABLED(irq, cm) && GIC_TEST_PENDING(irq, cm)) {
             if (GIC_GET_PRIORITY(irq, cpu) < best_prio) {
-                if (GIC_TEST_SECURE(best_irq, cm) &&
-                    (s->cpu_enabled[cpu] & 0x01)) {
+                if (GIC_TEST_SECURE(best_irq, cm) && enable_s) {
                     best_prio = GIC_GET_PRIORITY(irq, cpu);
                     best_irq = irq;
                 } else if (!GIC_TEST_SECURE(best_irq, cm) &&
-                           (s->cpu_enabled[cpu] & 0x02)) {
+                           enable_ns) {
                     best_prio = GIC_GET_PRIORITY(irq, cpu);
                     best_irq = irq;
                 }
@@ -134,10 +148,6 @@ static void gic_update_trustzone(GICState  *s, int cpu)
 
     if (best_irq != 1023) {
         int secure_int = GIC_TEST_SECURE(best_irq, cm);
-        int enable_s  = (s->cpu_enabled[cpu] & 0x01);
-        int enable_ns = (s->cpu_enabled[cpu] & 0x02);
-        int fiq_en    = (s->cpu_enabled[cpu] & 0x08);
-
         if (s->running_irq[cpu] == 1023) {            
             /* No active interrupt */
             if (secure_int && enable_s) {
@@ -199,15 +209,15 @@ static void gic_update_trustzone(GICState  *s, int cpu)
 
 void gic_update(GICState  *s)
 {
+#ifdef GIC_SECURITY_EXTENSIONS
     int cpu;
 
     for (cpu = 0; cpu < NUM_CPU(s); cpu++) {
-#ifdef GIC_SECURITY_EXTENSIONS
         gic_update_trustzone(s, cpu);       
+    }
 #else
-        gic_update_simple(s, cpu);
+    gic_update_simple(s);
 #endif
-     }
 }
 
 
@@ -527,7 +537,7 @@ static uint32_t gic_dist_readl(void *opaque, hwaddr offset)
     if (offset == 0xF00) {
         /* NOTE: TrustZone: Certain software ... tries to read from this
          * register - we simply pretend 0 */
-        DPRINTF("BUG EMULATION: Read from W/O ICDSGIR");
+        //DPRINTF("BUG EMULATION: Read from W/O ICDSGIR");
         val = 0;
     } else {
         val = gic_dist_readw(opaque, offset);
@@ -860,8 +870,8 @@ static void gic_cpu_write(GICState *s, int cpu, int offset, uint32_t value)
         }
 
         DPRINTF("CPU %d sec:%sabled nwd:%sabled\n",
-                cpu, (s->cpu_enabled[cpu] & 1) ? "En" : "Dis",
-                (s->cpu_enabled[cpu] & 2)? "En" : "Dis");
+                cpu, (s->cpu_enabled[cpu] & 0x1) ? "En" : "Dis",
+                (s->cpu_enabled[cpu] & 0x2)? "En" : "Dis");
 
         break;
     case 0x04: /* Priority mask */
