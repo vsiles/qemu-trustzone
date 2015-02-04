@@ -359,8 +359,10 @@ void arm_load_kernel(ARMCPU *cpu, struct arm_boot_info *info)
 
     /* Load the kernel.  */
     if (!info->kernel_filename) {
-        fprintf(stderr, "Kernel image must be specified\n");
-        exit(1);
+        /* If no kernel specified, do nothing; we will start from address 0
+         * (typically a boot ROM image) in the same way as hardware.
+         */
+        return;
     }
 
     machine_opts = qemu_opts_find(qemu_find_opts("machine"), 0);
