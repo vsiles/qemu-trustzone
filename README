@@ -3,3 +3,6 @@ Read the documentation in qemu-doc.html or on http://wiki.qemu.org
 - QEMU team
 
 For ARM TrustZone related changes see README.IAIK
+
+vsiles: I'm archiving this clone since the up to date version of qemu has
+now a brilliant support for ARM Trustzone
